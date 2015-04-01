@@ -45,7 +45,12 @@ object GirvanNewmanTest {
 		)
 
 
-		GirvanNewman.run(testGraph)
+		val GNGraph = GirvanNewman.run(testGraph).subgraph(epred = (et) => et.srcId < et.dstId)
+		GNGraph.triplets.foreach(triplet => {
+			println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
+		})
+
+		
 
 
 

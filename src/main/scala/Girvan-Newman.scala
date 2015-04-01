@@ -8,7 +8,7 @@ import scala.reflect.ClassTag
 
 object GirvanNewman {
 
-	def run[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Unit = {
+	def run[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Graph[VD, Double] = {
 
 		graph.cache()
 
@@ -17,8 +17,8 @@ object GirvanNewman {
 
 		
 
-		// def betweennessGraphForRoot(root:VertexId): Graph[VD, Double] = {
-		def betweennessGraphForRoot(root:VertexId): Unit = {
+		def betweennessGraphForRoot(root:VertexId): Graph[VD, Double] = {
+		// def betweennessGraphForRoot(root:VertexId): Unit = {
 
 			val landmarks: Seq[VertexId] = Seq(root)
 
@@ -35,8 +35,8 @@ object GirvanNewman {
 			val maxDistance = groupedShortestPaths.keys.max
 			val furthestVerticesSet = groupedShortestPaths(maxDistance).keys.toSet
 
-			println("furthest vertices")
-			furthestVerticesSet.foreach(println)
+			// println("furthest vertices")
+			// furthestVerticesSet.foreach(println)
 
 			val shortestPathGraph = graph.subgraph(epred = (triplet) => (shortestPathsMap(triplet.srcId)+1 == shortestPathsMap(triplet.dstId)))
 
@@ -130,36 +130,36 @@ object GirvanNewman {
 			betweennessVertexGraph
 			.mapTriplets(triplet => triplet.attr * triplet.dstAttr)
 
-			Graph(graph.vertices, betweennessGraph.edges).triplets.foreach(triplet => {
-				println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-					") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-					", " + triplet.dstAttr + ")")
-			})
+			// Graph(graph.vertices, betweennessGraph.edges).triplets.foreach(triplet => {
+			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
+			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
+			// 		", " + triplet.dstAttr + ")")
+			// })
+
+			Graph(graph.vertices, betweennessGraph.edges)
 		}
 
-		// var returnGraph = graph.mapEdges(e => 0.0)
-		// returnGraph.cache()
+		var returnGraph = graph.mapEdges(e => 0.0)
+		returnGraph.cache()
 
-		// // val vertexIterator : Iterator[VertexId] = graph.vertices.toLocalIterator
+		val vertexIterator : Iterator[VertexId] = graph.vertices.keys.toLocalIterator
 
 		// val vertexIterator  = (0 to 1).iterator
-		// while(vertexIterator.hasNext) {
+		while(vertexIterator.hasNext) {
 
-		// 	val singleBetweennessGraph = 
-		// 		betweennessGraphForRoot(vertexIterator.next)
+			val singleBetweennessGraph = 
+				betweennessGraphForRoot(vertexIterator.next)
 
-		// 	singleBetweennessGraph.triplets.foreach(triplet => {
-		// 		println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 			") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 			", " + triplet.dstAttr + ")")
-		// 	})
+			// singleBetweennessGraph.triplets.foreach(triplet => {
+			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
+			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
+			// 		", " + triplet.dstAttr + ")")
+			// })
 
-		// 	returnGraph = Graph(returnGraph.vertices,
-		// 		returnGraph.edges ++ singleBetweennessGraph.edges ++ singleBetweennessGraph.edges.reverse)
-		// 		.groupEdges( (e1, e2) => e1 + e2)
-
-
-		// }
+			returnGraph = Graph(returnGraph.vertices,
+				returnGraph.edges ++ singleBetweennessGraph.edges ++ singleBetweennessGraph.edges.reverse)
+				.groupEdges( (e1, e2) => e1 + e2)
+		}
 
 		// returnGraph.triplets.foreach(triplet => {
 		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
@@ -167,6 +167,11 @@ object GirvanNewman {
 		// 		", " + triplet.dstAttr + ")")
 		// })
 
+		// returnGraph.triplets.foreach(triplet => {
+		// 	println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
+		// })
+
+		returnGraph
 
 
 		// val landmarks: Seq[VertexId] = graph.vertices.collect.map(pair => pair._1).toSeq
@@ -380,7 +385,7 @@ object GirvanNewman {
 
 		// 	val betweennessGraph = Graph(graph.vertices, tempBetweennessGraph.edges)
 
-		betweennessGraphForRoot(1)
+		// betweennessGraphForRoot(1)
 		// val betweennessGraph = betweennessGraphForRoot(1)
 
 		// betweennessGraph.triplets.foreach(triplet => {
