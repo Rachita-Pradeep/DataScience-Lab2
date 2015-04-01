@@ -14,6 +14,8 @@ object GirvanNewmanTest {
 		
 		val conf = new SparkConf()
 	      .setAppName("GirvinNewmanTest")
+	      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+	      // .set("spark.kryo.registrator", "Registrator")
 	    val sc = new SparkContext(conf)
 
 		//graph file is in args(0)
@@ -32,6 +34,8 @@ object GirvanNewmanTest {
 		//need to get edges, get reverse of edges, union the two and create a new graph
 
 		val testGraph = Graph(inputGraph.vertices, inputGraph.edges ++ inputGraph.edges.reverse)
+
+		//might need to group edges to remove duplicates
 
 		testGraph.triplets.foreach( triplet => {
 
