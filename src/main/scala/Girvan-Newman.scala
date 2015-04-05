@@ -4,395 +4,249 @@ package edu.cornell.tech.cs5304.lab2
 import org.apache.spark.graphx._
 import org.apache.spark.graphx.lib.ShortestPaths
 import org.apache.spark.graphx.lib.ShortestPaths._
-import scala.reflect.ClassTag
+import scala.reflect.{ClassTag, classTag}
 
 object GirvanNewman {
 
-	def run[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Graph[VD, Double] = {
+	//this mak contains the values of vertex 'contributors', including possibly the vertex itself
+	type GNMap = Map[VertexId, Double]
+	type RootGNMap = Map[VertexId, GNMap]
+	private def makeMap(x: (VertexId, Double)*) = Map(x: _*)
+	private def makeRootMap(x: (VertexId, GNMap)*) = Map(x: _*)
+
+	private def addMaps(gnmap1: GNMap, gnmap2: GNMap): GNMap =
+	    (gnmap1.keySet ++ gnmap2.keySet).map {
+	      k => k -> (gnmap1.getOrElse(k, 0.0) + gnmap2.getOrElse(k, 0.0))
+	    }.toMap
+
+	private def replaceValuesInMap(gnmap1: GNMap, gnmap2: GNMap): GNMap =
+	    (gnmap1.keySet ++ gnmap2.keySet).map {
+	      k => k -> gnmap2.getOrElse(k, gnmap1(k))
+	    }.toMap
+
+	private def mergeMapsWithAdd(rootMap1: RootGNMap, rootMap2: RootGNMap): RootGNMap =
+	    (rootMap1.keySet ++ rootMap2.keySet).map {
+	      k => k -> addMaps(rootMap1.getOrElse(k, Map()), rootMap2.getOrElse(k, Map()))
+	    }.toMap
+
+	private def mergeMapsWithReplace(rootMap1: RootGNMap, rootMap2: RootGNMap): RootGNMap =
+	    (rootMap1.keySet ++ rootMap2.keySet).map {
+	      k => k -> replaceValuesInMap(rootMap1.getOrElse(k, rootMap2(k)), rootMap2.getOrElse(k, Map()))
+	    }.toMap
+
+	private def sumGNMap(gnmap: GNMap): Double = gnmap.values.foldLeft(0.0)(_ + _)
+
+
+	def computeBetweennessGraph[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED], maxGroupSize: Int = Int.MaxValue): Graph[VD, Double] = {
+	// def runAlternate[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Unit = {
 
 		graph.cache()
 
-		// val landmarks: Seq[VertexId] = graph.vertices.collect.map(pair => pair._1).toSeq
-		// val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, landmarks)
+		def betweennessGraphForRoots(roots:Seq[VertexId]): Graph[VD, Double] = {
 
-		
-
-		def betweennessGraphForRoot(root:VertexId): Graph[VD, Double] = {
-		// def betweennessGraphForRoot(root:VertexId): Unit = {
-
-			val landmarks: Seq[VertexId] = Seq(root)
-
-			val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, landmarks)
-
-			val shortestPathsMap: SPMap = shortestPaths.vertices.collect.toMap
-			.map(pair => (pair._1, pair._2(root)))
-			// println("Shortest Path from " + root)
-			// shortestPathsMap.foreach{ case (vid:VertexId, len:Int) => {
-			// 		println(root + " -> " + vid + ": " + len)
-			// 	}
-			// }
-			val groupedShortestPaths = shortestPathsMap.groupBy(pair => pair._2)
-			val maxDistance = groupedShortestPaths.keys.max
-			val furthestVerticesSet = groupedShortestPaths(maxDistance).keys.toSet
-
-			// println("furthest vertices")
-			// furthestVerticesSet.foreach(println)
-
-			val shortestPathGraph = graph.subgraph(epred = (triplet) => (shortestPathsMap(triplet.srcId)+1 == shortestPathsMap(triplet.dstId)))
-
-			val nonTerminalVertices: Set[VertexId] = shortestPathGraph.outDegrees
-				.keys
-				.collect
-				.toSet
-
-			val terminalVertices: Set[VertexId] = shortestPathGraph
-				.vertices
-				.filter(pair => !(nonTerminalVertices.contains(pair._1)))
-				.keys
-				.collect
-				.toSet
-
-			// println("terminal vertices")
-			// terminalVertices.foreach(println)
+			// each node contains a map, 
+			// keys are landmarks, 
+			// values are shortest path FROM node TO the root
+			// note that since our graph is expected to be undirected,
+			// source and destination should not matter
+			roots.foreach(println)
+			val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, roots)
 
 
-			// shortestPathGraph.triplets.foreach(triplet => {
-			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-			// 		", " + triplet.dstAttr + ")")
-			// })
-			val initialGraph = shortestPathGraph.mapVertices((id, _) => if (id == root) 1.0 else Double.PositiveInfinity)
-			val numShortestPathsGraph = initialGraph.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.Out)(
-			  (id, dist, newDist) => math.min(dist, newDist), // Vertex Program
+			val terminalVerticesMap = collection.mutable.Map[VertexId, Set[VertexId]]()
+			val noEdges = shortestPaths.vertices.context.emptyRDD(classTag[Edge[VertexId]])
+			var shortestPathGraph: Graph[SPMap, VertexId] = Graph(shortestPaths.vertices, noEdges)
+			shortestPathGraph.cache()
+
+
+
+			for (root <- roots) {
+				//create graph of all the edges required for shortest paths from root to all other nodes
+				//mark edges with id of root
+				//this will allow us route messages later
+				val shortestPathGraphForRoot: Graph[SPMap, VertexId] = shortestPaths
+					.subgraph(epred = (triplet) => {
+						val srcDistance = triplet.srcAttr.getOrElse(root, Int.MaxValue)
+						val dstDistance = triplet.dstAttr.getOrElse(root, Int.MaxValue)
+						if ( srcDistance == Int.MaxValue) false
+						else (srcDistance+1 == dstDistance)
+						// triplet.srcAttr(root)+1 == triplet.dstAttr(root)
+					})
+					.mapEdges(pair => root)
+
+				val terminalVertices: Set[VertexId] = 
+					shortestPathGraphForRoot.outerJoinVertices(shortestPathGraph.outDegrees) { (id, oldAttr, outDegOpt) =>
+					  outDegOpt match {
+					    case Some(outDeg) => outDeg
+					    case None => 0 // No outDegree means zero outDegree
+					  }
+					}
+					.vertices
+					.filter(pair => pair._2 == 0)
+					.keys
+					.collect
+					.toSet
+
+				terminalVerticesMap(root) = terminalVertices
+
+				shortestPathGraph = Graph(shortestPathGraph.vertices,
+				shortestPathGraph.edges ++ shortestPathGraphForRoot.edges)
+
+			}
+
+			// vertices contain maps
+			// keys are roots (parameter)
+			// values are the number of shortest paths to this node from the key
+			
+			val initialGraph = shortestPathGraph.mapVertices { (id, attr) =>
+		      if (roots.contains(id)) makeRootMap(id -> makeMap(id -> 1.0)) else makeRootMap()
+		    }
+
+		    val initialMessage = makeRootMap()
+
+		    // remember that this graph is a multiset of combined shortest path graphs above
+		    // The edge attributes denote the root vertexId that they belong to
+			val numShortestPathsGraph: Graph[RootGNMap, VertexId] = initialGraph.pregel(initialMessage, Int.MaxValue, EdgeDirection.Out)(
+			  (id, attr, msg) => {
+			  	mergeMapsWithReplace(attr, msg)
+			  }, // Vertex Program
 			  triplet => {  // Send Message
-			    if (triplet.srcAttr != Double.PositiveInfinity) {
-			    	// println(triplet.srcId + " -> " + triplet.dstId)
-			    	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-			     //  	else Iterator((triplet.dstId, triplet.srcAttr))
-			     Iterator((triplet.dstId, triplet.srcAttr))
+			  	//compute src sum
+			  	val srcSum = sumGNMap(triplet.srcAttr.getOrElse(triplet.attr, makeMap()))
+			  	val dstGNMap = triplet.dstAttr.getOrElse(triplet.attr, makeMap())
+			  	val dstExpectation = dstGNMap.getOrElse(triplet.srcId, 0.0)
+			  	
+			  	//check against dst expectation
+			  	//if different, must have changed,
+			  	//send message with updated value
+			  	//should probably change this to an approximation
+			    if (srcSum != dstExpectation) {
+			    	// println(triplet.attr + ": " + triplet.srcId + " -(" + srcSum +")-> " + triplet.dstId)
+			    	Iterator((triplet.dstId, makeRootMap(triplet.attr -> makeMap(triplet.srcId -> srcSum))))
 			    } else {
 			      	Iterator.empty
 			    }
 			  },
-			  (a,b) => a + b // Merge Message
+			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
-			// numShortestPathsGraph.vertices.collect
-			// .foreach { case (vid:VertexId, numPaths:Double) => {
-			// 		println( vid + ": " + numPaths)
-			// 	}
-			// }
 
-			val numShortestPathsWithEdgeWeightsGraph = 
+			// val verticesArray: Array[(VertexId, RootGNMap)] = numShortestPathsGraph.vertices.collect
+
+			// roots.foreach(root => {
+			// 	println("\nShortest paths for root " + root)
+			// 	verticesArray.foreach( pair => {
+			// 		println(pair._1 + ": " + sumGNMap(pair._2.getOrElse(root, Map())))
+			// 	})
+			// })
+
+			val numShortestPathsWithEdgeWeightsGraph:Graph[RootGNMap, (VertexId, Double)] = 
 			numShortestPathsGraph
-			.mapTriplets(triplet => triplet.srcAttr / triplet.dstAttr)
+			.mapTriplets(  triplet => (triplet.attr, sumGNMap(triplet.srcAttr(triplet.attr)) / sumGNMap(triplet.dstAttr(triplet.attr))))
 
-			// // numShortestPathsWithEdgeWeightsGraph.triplets.foreach(triplet => {
-			// // 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-			// // 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-			// // 		", " + triplet.dstAttr + ")")
-			// // })
-
-
-			//this needs to handle all nodes that don't have outlinks
-			val initialGraph2 = numShortestPathsWithEdgeWeightsGraph
-			// .mapVertices((id, _) => if (furthestVerticesSet.contains(id)) 1.0 else Double.PositiveInfinity)
-			.mapVertices((id, _) => if (terminalVertices.contains(id)) 1.0 else Double.PositiveInfinity)
+			//for each node, create a map
+			val initialGraph2 = numShortestPathsWithEdgeWeightsGraph.mapVertices { (id, attr) =>
+		      roots.map(root => makeRootMap(root -> makeMap(id -> 1.0)))
+		      	.foldLeft(makeRootMap())( (acc, x) => mergeMapsWithReplace(acc, x))
+		    }
 		
-			val betweennessVertexGraph = initialGraph2.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.In)(
-			  // (id, dist, newDist) => math.min(dist, 1.0 + newDist), // Vertex Program
-			  (id, dist, newDist) => {
-			  	if (terminalVertices.contains(id)) dist
-			  	else if (dist == Double.PositiveInfinity) math.min(dist, 1.0 + newDist)
-			  	else dist + newDist
-
+			val betweennessVertexGraph = initialGraph2.pregel(initialMessage, 10, EdgeDirection.In)(
+			  (id, attr, msg) => {
+			  	mergeMapsWithReplace(attr, msg)
 			  },
 			  triplet => {  // Send Message
-			    if (triplet.dstAttr != Double.PositiveInfinity) {
-			    	// println("\n\n\n\n\n" + triplet.srcId + " -> " + triplet.dstId)
-			    	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-			     //  	else Iterator((triplet.dstId, triplet.srcAttr))
-			      	Iterator((triplet.srcId, triplet.dstAttr*triplet.attr))
+
+			  	val dstSum:Double = sumGNMap(triplet.dstAttr.getOrElse(triplet.attr._1, makeMap()))
+			  	val edgeWeight:Double = triplet.attr._2
+			  	val srcGNMap = triplet.srcAttr.getOrElse(triplet.attr._1, makeMap())
+			  	val srcExpectation = srcGNMap.getOrElse(triplet.dstId, 0.0)
+
+			  	//check against dst expectation
+			  	//if different, must have changed,
+			  	//send message with updated value
+			  	//should probably change this to an approximation
+			    if (dstSum*edgeWeight != srcExpectation) {
+			    	// println(triplet.attr + ": " + triplet.dstId + " -(" + dstSum*edgeWeight +")-> " + triplet.srcId)
+			    	Iterator((triplet.srcId, makeRootMap(triplet.attr._1 -> makeMap(triplet.dstId -> dstSum*edgeWeight))))
 			    } else {
 			      	Iterator.empty
 			    }
 			  },
-			  (a,b) => a + b // Merge Message
+			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
-			// betweennessVertexGraph.triplets.foreach(triplet => {
-			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-			// 		", " + triplet.dstAttr + ")")
+			val verticesArray: Array[(VertexId, RootGNMap)] = betweennessVertexGraph.vertices.collect
+
+			// roots.foreach(root => {
+			// 	println("\nShortest paths for root " + root)
+			// 	verticesArray.foreach( pair => {
+			// 		println(pair._1 + ": " + sumGNMap(pair._2.getOrElse(root, Map())))
+			// 	})
 			// })
 
-			val betweennessGraph = 
+			val betweennessGraphEdges = 
 			betweennessVertexGraph
-			.mapTriplets(triplet => triplet.attr * triplet.dstAttr)
+			.mapTriplets(triplet => triplet.attr._2 * sumGNMap(triplet.dstAttr(triplet.attr._1)))
+			.edges
 
-			// Graph(graph.vertices, betweennessGraph.edges).triplets.foreach(triplet => {
-			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-			// 		", " + triplet.dstAttr + ")")
-			// })
-
-			Graph(graph.vertices, betweennessGraph.edges)
+			Graph(graph.vertices, betweennessGraphEdges ++ betweennessGraphEdges.reverse)
+			.groupEdges( (e1, e2) => e1 + e2)
 		}
 
+		var graphVertices = graph.vertices.collect.map(pair => pair._1).toSeq
 		var returnGraph = graph.mapEdges(e => 0.0)
-		returnGraph.cache()
 
-		val vertexIterator : Iterator[VertexId] = graph.vertices.keys.toLocalIterator
-
-		// val vertexIterator  = (0 to 1).iterator
-		while(vertexIterator.hasNext) {
-
-			val singleBetweennessGraph = 
-				betweennessGraphForRoot(vertexIterator.next)
-
-			// singleBetweennessGraph.triplets.foreach(triplet => {
-			// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-			// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-			// 		", " + triplet.dstAttr + ")")
-			// })
-
+		while (!graphVertices.isEmpty) {
+			
+			val singleBetweennessGraph = betweennessGraphForRoots(graphVertices.take(maxGroupSize))
+			
 			returnGraph = Graph(returnGraph.vertices,
-				returnGraph.edges ++ singleBetweennessGraph.edges ++ singleBetweennessGraph.edges.reverse)
+				returnGraph.edges ++ singleBetweennessGraph.edges)
 				.groupEdges( (e1, e2) => e1 + e2)
+
+			singleBetweennessGraph.unpersist()
+			returnGraph.cache()
+
+			graphVertices = graphVertices.drop(maxGroupSize)
+
 		}
-
-		// returnGraph.triplets.foreach(triplet => {
-		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 		", " + triplet.dstAttr + ")")
-		// })
-
-		// returnGraph.triplets.foreach(triplet => {
-		// 	println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-		// })
-
 		returnGraph
 
+		// 5-(23.79047619047619)-> 8
+		// 0-(21.504761904761907)-> 3
+		// 3-(17.75238095238095)-> 6
+		// 7-(17.504761904761907)-> 9
+		// 6-(17.038095238095238)-> 8
+		// 0-(16.038095238095238)-> 4
+		// 0-(14.771428571428569)-> 1
+		// 0-(14.771428571428569)-> 2
+		// 8-(14.752380952380953)-> 10
+		// 4-(14.704761904761904)-> 7
+		// 9-(13.41904761904762)-> 10
+		// 3-(12.99047619047619)-> 7
+		// 1-(12.37142857142857)-> 5
+		// 2-(12.37142857142857)-> 5
+		// 6-(12.219047619047618)-> 9
+		// 1-(2.0)-> 2
 
-		// val landmarks: Seq[VertexId] = graph.vertices.collect.map(pair => pair._1).toSeq
-		// // // val landmarks: Seq[VertexId] = Seq(0)
-
-		// val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, landmarks)
-
-		// // Array[(VertexId, Map[VertexId, Int])]
-		// val sourceId = 0
-
-		// // println("Shortest Path from " + source_id)
-		// // shortestPaths.vertices.collect
-		// // .foreach{ case (vid:VertexId, pathMap:Map[VertexId, Int]) => {
-		// // 		println(source_id + " -> " + vid + ": " + pathMap(source_id))
-		// // 	}
-		// // }
-
-		// val shortestPathsMap: Map[VertexId, Map[VertexId, Int]] = shortestPaths.vertices.collect.toMap
-		// // shortestPathsMap(sourceId).foreach { case (vid:VertexId, length:Int) => {
-		// // 		println(sourceId + " -> " + vid + ": " + length)
-		// // 	}
-		// // }
-
-		// val groupedShortestPaths = shortestPathsMap(sourceId)
-		// 	.groupBy(pair => pair._2)
-
-		// val maxDistance = groupedShortestPaths.keys.max
-
-		// val furthestVerticesSet = groupedShortestPaths(maxDistance).keys.toSet
-
-		// //for each vertex
-
-		
-
-
-		// //Init all vertices in group 1 = 1
-
-		// //for each group, where g begins at g=2
-		// //send messages from nodes in g-1 to g (connected), total
-
-		// //to make this easier, we can construct a new graph of only edges where g-1 -> g, i.e., path length is increasing by 1
-
-		// val sourceShortestPathMap = shortestPathsMap(sourceId)
-		// val shortestPathGraph = graph.subgraph(epred = (triplet) => (sourceShortestPathMap(triplet.srcId)+1 == sourceShortestPathMap(triplet.dstId)))
-
-		// //then we can use the pregel api to do the rest
-
-		// //for each node in shortestPathGraph, compute number of shortest paths
-		// //flowing from A -> K, each node is the sum of it's parents
-
-		// val initialGraph = shortestPathGraph.mapVertices((id, _) => if (id == sourceId) 1.0 else Double.PositiveInfinity)
-		// val numShortestPathsGraph = initialGraph.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.Out)(
-		//   (id, dist, newDist) => math.min(dist, newDist), // Vertex Program
-		//   triplet => {  // Send Message
-		//     if (triplet.srcAttr != Double.PositiveInfinity) {
-		//     	// println(triplet.srcId + " -> " + triplet.dstId)
-		//     	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-		//      //  	else Iterator((triplet.dstId, triplet.srcAttr))
-		//      Iterator((triplet.dstId, triplet.srcAttr))
-		//     } else {
-		//       	Iterator.empty
-		//     }
-		//   },
-		//   (a,b) => a + b // Merge Message
-		//   )
-
-		// numShortestPathsGraph.vertices.collect
-		// .foreach { case (vid:VertexId, numPaths:Int) => {
-		// 		println( vid + ": " + numPaths)
-		// 	}
-		// }
-		// //next, map each edge value to be the ratio of src.Attr / dst.Attr
-
-		// val numShortestPathsWithEdgeWeightsGraph = 
-		// numShortestPathsGraph.mapTriplets(triplet => triplet.srcAttr / triplet.dstAttr)
-
-
-		// val initialGraph2 = numShortestPathsWithEdgeWeightsGraph
-		// 	.mapVertices((id, _) => if (furthestVerticesSet.contains(id)) 1.0 else Double.PositiveInfinity)
-		
-		// val betweennessVertexGraph = initialGraph2.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.In)(
-		//   (id, dist, newDist) => math.min(dist, 1.0 + newDist), // Vertex Program
-		//   triplet => {  // Send Message
-		//     if (triplet.dstAttr != Double.PositiveInfinity) {
-		//     	// println("\n\n\n\n\n" + triplet.srcId + " -> " + triplet.dstId)
-		//     	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-		//      //  	else Iterator((triplet.dstId, triplet.srcAttr))
-		//       	Iterator((triplet.srcId, triplet.dstAttr*triplet.attr))
-		//     } else {
-		//       	Iterator.empty
-		//     }
-		//   },
-		//   (a,b) => a + b // Merge Message
-		//   )
-
-		// val betweennessGraph = 
-		// betweennessVertexGraph.mapTriplets(triplet => triplet.attr * triplet.dstAttr)
-
-		// // numShortestPathsWithEdgeWeightsGraph.triplets.foreach(triplet => {
-		// // 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// // 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// // 		", " + triplet.dstAttr + ")")
-		// // })
-		// //finally, use pregel to set edge weights.
-		// //node value = 1 + sum(child edges) (i.e., message values)
-
-
-		// //new edge values will be current edge value + (node valueA * edge valueA)
-		// //update both ways!!!
-
-		// numShortestPathsGraph.vertices.collect
-		// .foreach { case (vid:VertexId, numPaths:Double) => {
-		// 		println( vid + ": " + numPaths)
-		// 	}
-		// }
-
-		// numShortestPathsWithEdgeWeightsGraph.triplets.foreach(triplet => {
-		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 		", " + triplet.dstAttr + ")")
-		// })
-
-		// // initialGraph2.vertices.collect
-		// // .foreach { case (vid:VertexId, betweennessValue:Double) => {
-		// // 		println( vid + ": " + betweennessValue)
-		// // 	}
-		// // }
-
-		// betweennessVertexGraph.vertices.collect
-		// .foreach { case (vid:VertexId, betweennessValue:Double) => {
-		// 		println( vid + ": " + betweennessValue)
-		// 	}
-		// }
-
-		// betweennessGraph.triplets.foreach(triplet => {
-		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 		", " + triplet.dstAttr + ")")
-		// })
-
-		// val computedBetweennessGraph = betweennessGraphForRoot(0)
-
-		// computedBetweennessGraph.triplets.foreach(triplet => {
-		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 		", " + triplet.dstAttr + ")")
-		// })
-
-		// betweennessGraphForRoot(0)
-
-		// val root = 0
-
-		// val landmarks: Seq[VertexId] = Seq(root)
-
-		// 	val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, landmarks)
-
-		// 	val shortestPathsMap: Map[VertexId, Int] = shortestPaths.vertices.collect.toMap
-		// 	.mapValues(m => m(root))
-		// 	// println("Shortest Path from " + root)
-		// 	// shortestPathsMap.foreach{ case (vid:VertexId, len:Int) => {
-		// 	// 		println(root + " -> " + vid + ": " + len)
-		// 	// 	}
-		// 	// }
-		// 	val groupedShortestPaths = shortestPathsMap.groupBy(pair => pair._2)
-		// 	val maxDistance = groupedShortestPaths.keys.max
-		// 	val furthestVerticesSet = groupedShortestPaths(maxDistance).keys.toSet
-
-		// 	val shortestPathGraph = graph.subgraph(epred = (triplet) => (shortestPathsMap(triplet.srcId)+1 == shortestPathsMap(triplet.dstId)))
-
-		// 	val initialGraph = shortestPathGraph.mapVertices((id, _) => if (id == root) 1.0 else Double.PositiveInfinity)
-		// 	val numShortestPathsGraph = initialGraph.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.Out)(
-		// 	  (id, dist, newDist) => math.min(dist, newDist), // Vertex Program
-		// 	  triplet => {  // Send Message
-		// 	    if (triplet.srcAttr != Double.PositiveInfinity) {
-		// 	    	// println(triplet.srcId + " -> " + triplet.dstId)
-		// 	    	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-		// 	     //  	else Iterator((triplet.dstId, triplet.srcAttr))
-		// 	     Iterator((triplet.dstId, triplet.srcAttr))
-		// 	    } else {
-		// 	      	Iterator.empty
-		// 	    }
-		// 	  },
-		// 	  (a,b) => a + b // Merge Message
-		// 	  )
-
-		// 	val numShortestPathsWithEdgeWeightsGraph = 
-		// 	numShortestPathsGraph
-		// 	.mapTriplets(triplet => triplet.srcAttr / triplet.dstAttr)
-
-		// 	val initialGraph2 = numShortestPathsWithEdgeWeightsGraph
-		// 	.mapVertices((id, _) => if (furthestVerticesSet.contains(id)) 1.0 else Double.PositiveInfinity)
-		
-		// 	val betweennessVertexGraph = initialGraph2.pregel(Double.PositiveInfinity, Int.MaxValue, EdgeDirection.In)(
-		// 	  (id, dist, newDist) => math.min(dist, 1.0 + newDist), // Vertex Program
-		// 	  triplet => {  // Send Message
-		// 	    if (triplet.dstAttr != Double.PositiveInfinity) {
-		// 	    	// println("\n\n\n\n\n" + triplet.srcId + " -> " + triplet.dstId)
-		// 	    	// if(triplet.srcId == sourceId) Iterator((triplet.dstId, 1.0))
-		// 	     //  	else Iterator((triplet.dstId, triplet.srcAttr))
-		// 	      	Iterator((triplet.srcId, triplet.dstAttr*triplet.attr))
-		// 	    } else {
-		// 	      	Iterator.empty
-		// 	    }
-		// 	  },
-		// 	  (a,b) => a + b // Merge Message
-		// 	  )
-
-		// 	val tempBetweennessGraph = 
-		// 	betweennessVertexGraph
-		// 	.mapTriplets(triplet => triplet.attr * triplet.dstAttr)
-
-		// 	val betweennessGraph = Graph(graph.vertices, tempBetweennessGraph.edges)
-
-		// betweennessGraphForRoot(1)
-		// val betweennessGraph = betweennessGraphForRoot(1)
-
-		// betweennessGraph.triplets.foreach(triplet => {
-		// 	println( "(" + triplet.srcId + ", " + triplet.srcAttr + 
-		// 		") -(" + triplet.attr + ")-> (" + triplet.dstId + 
-		// 		", " + triplet.dstAttr + ")")
-		// })
+		// betweennessGraphForRoots(graph.vertices.collect.map(pair => pair._1).toSeq)
+		// 5-(23.79047619047619)-> 8
+		// 0-(21.504761904761907)-> 3
+		// 3-(17.75238095238095)-> 6
+		// 7-(17.504761904761907)-> 9
+		// 6-(17.038095238095238)-> 8
+		// 0-(16.038095238095238)-> 4
+		// 0-(14.771428571428569)-> 1
+		// 0-(14.771428571428569)-> 2
+		// 8-(14.752380952380953)-> 10
+		// 4-(14.704761904761904)-> 7
+		// 9-(13.41904761904762)-> 10
+		// 3-(12.99047619047619)-> 7
+		// 1-(12.37142857142857)-> 5
+		// 2-(12.37142857142857)-> 5
+		// 6-(12.219047619047618)-> 9
+		// 1-(2.0)-> 2
+		// betweennessGraphForRoots(Seq(0))
 
 	}
 }
