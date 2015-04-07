@@ -5,6 +5,7 @@ import org.apache.spark.graphx._
 import org.apache.spark.graphx.lib.ShortestPaths
 import org.apache.spark.graphx.lib.ShortestPaths._
 import scala.reflect.{ClassTag, classTag}
+import org.apache.spark.rdd.RDD
 
 object GirvanNewman {
 
@@ -40,7 +41,7 @@ object GirvanNewman {
 	def computeBetweennessGraph[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED], maxGroupSize: Int = Int.MaxValue): Graph[VD, Double] = {
 	// def runAlternate[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Unit = {
 
-		graph.cache()
+		//graph.cache()
 
 		def betweennessGraphForRoots(roots:Seq[VertexId]): Graph[VD, Double] = {
 
@@ -49,14 +50,15 @@ object GirvanNewman {
 			// values are shortest path FROM node TO the root
 			// note that since our graph is expected to be undirected,
 			// source and destination should not matter
-			roots.foreach(println)
+			// roots.foreach(println)
 			val shortestPaths: Graph[SPMap, ED] = ShortestPaths.run(graph, roots)
+			shortestPaths.cache()
 
 
 			val terminalVerticesMap = collection.mutable.Map[VertexId, Set[VertexId]]()
 			val noEdges = shortestPaths.vertices.context.emptyRDD(classTag[Edge[VertexId]])
 			var shortestPathGraph: Graph[SPMap, VertexId] = Graph(shortestPaths.vertices, noEdges)
-			shortestPathGraph.cache()
+			// shortestPathGraph.cache()
 
 
 
@@ -89,10 +91,18 @@ object GirvanNewman {
 
 				terminalVerticesMap(root) = terminalVertices
 
+				val oldSPG = shortestPathGraph
 				shortestPathGraph = Graph(shortestPathGraph.vertices,
 				shortestPathGraph.edges ++ shortestPathGraphForRoot.edges)
+				shortestPathGraph.cache()
+
+				// Unpersist the RDDs hidden by newly-materialized RDDs
+				oldSPG.unpersistVertices(blocking=false)
+				oldSPG.edges.unpersist(blocking=false)
 
 			}
+			shortestPaths.unpersistVertices(blocking=false)
+			shortestPaths.edges.unpersist(blocking=false)
 
 			// vertices contain maps
 			// keys are roots (parameter)
@@ -104,6 +114,8 @@ object GirvanNewman {
 
 		    val initialMessage = makeRootMap()
 
+		    println("\n\n***********************************\n\n")
+		    println("pregel 1 start")
 		    // remember that this graph is a multiset of combined shortest path graphs above
 		    // The edge attributes denote the root vertexId that they belong to
 			val numShortestPathsGraph: Graph[RootGNMap, VertexId] = initialGraph.pregel(initialMessage, Int.MaxValue, EdgeDirection.Out)(
@@ -130,7 +142,8 @@ object GirvanNewman {
 			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
-
+			println("\n\n***********************************\n\n")
+		    println("pregel 1 end")
 			// val verticesArray: Array[(VertexId, RootGNMap)] = numShortestPathsGraph.vertices.collect
 
 			// roots.foreach(root => {
@@ -150,6 +163,8 @@ object GirvanNewman {
 		      	.foldLeft(makeRootMap())( (acc, x) => mergeMapsWithReplace(acc, x))
 		    }
 		
+			println("\n\n***********************************\n\n")
+		    println("pregel 2 start")
 			val betweennessVertexGraph = initialGraph2.pregel(initialMessage, 10, EdgeDirection.In)(
 			  (id, attr, msg) => {
 			  	mergeMapsWithReplace(attr, msg)
@@ -175,6 +190,9 @@ object GirvanNewman {
 			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
+			println("\n\n***********************************\n\n")
+		    println("pregel 2 end")
+
 			val verticesArray: Array[(VertexId, RootGNMap)] = betweennessVertexGraph.vertices.collect
 
 			// roots.foreach(root => {
@@ -195,19 +213,25 @@ object GirvanNewman {
 
 		var graphVertices = graph.vertices.collect.map(pair => pair._1).toSeq
 		var returnGraph = graph.mapEdges(e => 0.0)
+		returnGraph.cache()
 
 		while (!graphVertices.isEmpty) {
 			
 			val singleBetweennessGraph = betweennessGraphForRoots(graphVertices.take(maxGroupSize))
 			
+			val oldRG = returnGraph
 			returnGraph = Graph(returnGraph.vertices,
 				returnGraph.edges ++ singleBetweennessGraph.edges)
 				.groupEdges( (e1, e2) => e1 + e2)
-
-			singleBetweennessGraph.unpersist()
 			returnGraph.cache()
 
+			// singleBetweennessGraph.unpersist()
+			// returnGraph.cache()
+
 			graphVertices = graphVertices.drop(maxGroupSize)
+
+			oldRG.unpersistVertices(blocking=false)
+			oldRG.edges.unpersist(blocking=false)
 
 		}
 		returnGraph
@@ -247,6 +271,63 @@ object GirvanNewman {
 		// 6-(12.219047619047618)-> 9
 		// 1-(2.0)-> 2
 		// betweennessGraphForRoots(Seq(0))
+
+	}
+
+	def computeModularity[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Double = {
+
+		//get connected components
+		//generate graph for each component
+		
+		//cc map vertices onto their equivalence class representative (lowest vertex id in class)
+		//therefore, if they have the same representative, they are equivalent
+		graph.cache()
+
+		val normalizingCost = 0.5/graph.numEdges.toDouble
+
+		val connectedComponetLists:Iterable[Iterable[VertexId]] = 
+			graph
+			.subgraph(epred = (et) => (et.srcId < et.dstId))
+			.connectedComponents()
+			.vertices
+			.map(pair => (pair._2, pair._1))
+			.groupByKey
+			.collect
+			.map(pair => pair._2)
+
+		connectedComponetLists.foreach(it => {
+			println("PRINTING CC LISTS")
+			println("Length: " + it.toList.length)
+			it.foreach(println)
+		})
+
+		val verticesWithDegAndNeigh: VertexRDD[(Int, Array[VertexId])] =
+			graph.inDegrees.innerJoin(graph.collectNeighborIds(EdgeDirection.Out))((id, inDeg, neighbors) => (inDeg, neighbors))
+
+		val filteredRDDs: Iterable[VertexRDD[(Int, Array[VertexId])]] = 
+			connectedComponetLists
+			.map( connectedVertexList => {
+				verticesWithDegAndNeigh
+				.filter(pair => connectedVertexList.toArray.contains(pair._1))
+			})
+
+		val modularityValuesForComponent: Iterable[Double] =
+			filteredRDDs
+			.map( vertexRDD => {
+
+				val cartesianRDD = vertexRDD.cartesian(vertexRDD)
+				cartesianRDD
+				.map(pair => {
+					val nodeI: (VertexId, (Int, Array[VertexId])) = pair._1
+					val nodeJ: (VertexId, (Int, Array[VertexId])) = pair._2
+					val nullValue: Double = (nodeI._2._1 + nodeJ._2._1).toDouble * normalizingCost
+					if (nodeI._2._2.contains(nodeJ._1)) 1.0 - nullValue
+					else -nullValue
+				})
+				.fold(0.0)(_ + _)
+			})
+		
+		normalizingCost * modularityValuesForComponent.fold(0.0)(_ + _)
 
 	}
 }

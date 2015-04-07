@@ -12,13 +12,13 @@ import org.apache.spark.graphx._
 
 // import scala.math.sqrt
 // import scala.math.pow
-// import java.io._
+import java.io._
 
 // import org.apache.commons.math3.stat.descriptive.moment.StandardDeviation
 
 
 //["series/cogtech/AlexanderssonP06", ["Jan Alexandersson", "Norbert Pfleger"], 2006],
-class PaperRecord(paperString: String, authorString: String, yearString: String) extends Serializable {
+class PaperRecord(paperString: String, authorString: String, yearString: String, val line: String) extends Serializable {
 	// val paperRecordRegex = """[(.*), [(.*)], (\d{4})]""".r
  //    line match {
  //        case paperRecordRegex(paper, authorList, year) => println((paper, authorList, year))
@@ -32,7 +32,12 @@ class PaperRecord(paperString: String, authorString: String, yearString: String)
     // }
 
     val paper: String = paperString.replace("\"", "")
-    val authors: Array[String] = authorString.split(",").map( _.replace(" ", "")).filter(_.length > 0)
+    val paperSplit: Array[String] = paper.split("/")
+    val series: String = paperSplit(0)
+    val group: String = paperSplit(1)
+    // val paperId: String = paperSplit(2)
+    // val authors: Array[String] = authorString.split(",").map( _.replace(" ", "")).filter(_.length > 0)
+    val authors: Array[String] = authorString.split(",").filter(_.length > 0)
     val year: Int = yearString.toInt
 
     override def toString = s"$paper,$authors,$year"
@@ -44,7 +49,7 @@ object PaperRecord {
         val paperRecordRegex = "\\[(.*), \\[(.*)\\], (\\d{4})\\],".r
         line match {
             case paperRecordRegex(d, a, y) => {
-                if(a.length > 0) Some(new PaperRecord(d, a, y))
+                if(a.length > 0) Some(new PaperRecord(d, a, y, line))
                 else None
             }
             case _ => None
@@ -68,55 +73,106 @@ object PaperRecord {
 object DBLPGraph {
   /* find ngrams that match a regex; args are regex output input [input ..] */
 
-  // def main(args: Array[String]) {
+  def main(args: Array[String]) {
 
-  // 	// val writer = new PrintWriter(new File(args(0)))
-  // 	// def writeln(str: String): Unit = writer.write(str + '\n')
+  	// val writer = new PrintWriter(new File(args(0)))
+  	// def writeln(str: String): Unit = writer.write(str + '\n')
 
-    // val conf = new SparkConf()
-    //   .setAppName("dblpGraph")
-    //   // .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
-    //   // .set("spark.kryo.registrator", "Registrator")
-    // val sc = new SparkContext(conf)
+    val conf = new SparkConf()
+      .setAppName("dblpGraph")
+      // .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
+      // .set("spark.kryo.registrator", "Registrator")
+    val sc = new SparkContext(conf)
 
-  //   val paperFile = sc.textFile(args(0))
+    val paperFile = sc.textFile(args(0))
+    val outputDirectory = args(1)
 
-  //   val firstHundredLines = paperFile.take(100)
+    // val firstHundredLines = paperFile
 
-  //   // firstHundredLines.foreach(line => {
+    // firstHundredLines.foreach(line => {
 
-  //   //     val record = PaperRecord(line)
-  //   //     record match {
-  //   //         case Some(record) => println(record)
-  //   //         case None => {}
-  //   //     }
+    //     val record = PaperRecord(line)
+    //     record match {
+    //         case Some(record) => println(record)
+    //         case None => {}
+    //     }
 
 
-  //   // })
+    // })
 
-  //   val filteredRecords:Array[PaperRecord] = firstHundredLines
-  //       // .map(line => {
-  //       //     val record = PaperRecord(line)
-  //       //     record match {
-  //       //         case Some(record) => record
-  //       //         case _ => None
-  //       //     }
-  //       //     record
-  //       // })
-  //       .map(line => PaperRecord(line))
-  //       .flatMap(line => line )
+    
 
-  //   filteredRecords.foreach( record => {
-  //       println("**************************************************")
-  //       println(record.paper)
-  //       record.authors.foreach(println)
-  //       println(record.year)
-  //   })
+    val groupedRecords = paperFile
+        // .map(line => {
+        //     val record = PaperRecord(line)
+        //     record match {
+        //         case Some(record) => record
+        //         case _ => None
+        //     }
+        //     record
+        // })
+        .map(line => PaperRecord(line))
+        .flatMap(rec => rec )
+        .groupBy(rec => rec.series)
 
-  //   // (0 until 100).foreach(i => {
-  //   //     println(i + ": " + firstHundredLines(i))
-  //   //     new PaperRecord(firstHundredLines(i))
-  //   // })
+    groupedRecords.foreach(pair => {
+
+      // val record = pair._2.head
+
+      // val filteredRecords = pair._2.filter(rec => rec.authors.length >= 2).toArray.length
+      
+
+
+      // val uniqueAuthors = pair._2.flatMap(rec => rec.authors).toSet.size
+      // println(pair._1 + " : " + uniqueAuthors + "nodes, "+ filteredRecords + " edges")
+
+
+
+      // val outputFileName = outputDirectory + "dblp." + pair._1 + ".json"
+      // val pw = new java.io.PrintWriter(new File(outputFileName))
+
+      // pair._2.foreach( rec => {
+
+      //   pw.write(rec.line + "\n")
+
+      // })
+
+      // pw.close
+
+
+
+      // val record = pair._2.head
+      // println("**************************************************")
+      // println(record.paper)
+      // // println(record.series)
+      // // println(record.group)
+      // // println(record.paperId)
+      // record.authors.foreach(println)
+      // println(record.year)
+      // println(record.line)
+
+    })
+
+
+    // filteredRecords.foreach( record => {
+    //     println("**************************************************")
+    //     println(record.paper)
+    //     println(record.series)
+    //     println(record.group)
+    //     println(record.paperId)
+    //     record.authors.foreach(println)
+    //     println(record.year)
+    // })
+
+    // (0 until 100).foreach(i => {
+    //     println(i + ": " + firstHundredLines(i))
+    //     new PaperRecord(firstHundredLines(i))
+    // })
+
+    //need to write files
+    //need to create a graph where nodes are authors and edges exist if the authors have ever worked together
+    //first, create map of authors to author ids
+
 
     
 
@@ -124,5 +180,5 @@ object DBLPGraph {
 
 
 
-  // }
+  }
 }

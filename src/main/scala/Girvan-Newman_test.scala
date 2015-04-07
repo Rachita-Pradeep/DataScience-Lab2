@@ -78,67 +78,65 @@ object GirvanNewmanTest {
 			// 	.subgraph(epred = (et) => et.srcId < et.dstId)
 
 		var filteredGraph = testGraph.mapEdges(edge => 0.0)
-		var gnGraph: Graph[Int, Double] = filteredGraph
+		filteredGraph.cache()
+		// var gnGraph: Graph[Int, Double] = filteredGraph
+		var topEdge:EdgeTriplet[Int,Double] = null
+		var lastModularity = -1.0
 
-		gnGraph = GirvanNewman
+		var i=0
+		while(!filteredGraph.edges.isEmpty) {
+
+			// println()
+			val gnGraph = GirvanNewman
 				.computeBetweennessGraph(filteredGraph)
+			gnGraph.cache()
 
-			pw.write("\n***********************************\n\n")
-			println("\n***********************************\n\n")
+			filteredGraph.unpersistVertices(blocking=false)
+			filteredGraph.edges.unpersist(blocking=false)
+			
 			val sortedEdges = 
 				gnGraph
 				.triplets
 				.sortBy(triplet => triplet.attr, false)
 
-			sortedEdges
+			val edgeArray = sortedEdges
 			.collect
+		
+			pw.write("\n***********************************\n\n" + i + "\n\n")
+			println("\n***********************************\n\n" + i + "\n\n")
+			edgeArray
 			.filter(triplet => triplet.srcId < triplet.dstId)
 			.foreach(triplet => {
 					pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
 					println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
 				})
 
-			val topEdge = sortedEdges.first
+			topEdge = sortedEdges.first
+
+			sortedEdges.unpersist(blocking=false)
+
 			filteredGraph = gnGraph
 				.subgraph(epred = (et) => {
 					!(((et.srcId == topEdge.srcId) && (et.dstId == topEdge.dstId)) ||
 					((et.srcId == topEdge.dstId) && (et.dstId == topEdge.srcId)))
 				})
 
-		// while(!filteredGraph.edges.isEmpty) {
+			gnGraph.unpersistVertices(blocking=false)
+			gnGraph.edges.unpersist(blocking=false)
 
-		// 	val gnGraph = GirvanNewman
-		// 		.computeBetweennessGraph(filteredGraph)
-
-		// 	pw.write("\n***********************************\n\n")
-		// 	println("\n***********************************\n\n")
-		// 	val sortedEdges = 
-		// 		gnGraph
-		// 		.triplets
-		// 		.sortBy(triplet => triplet.attr, false)
-
-		// 	sortedEdges
-		// 	.collect
-		// 	.filter(triplet => triplet.srcId < triplet.dstId)
-		// 	.foreach(triplet => {
-		// 			pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
-		// 			println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-		// 		})
-
-		// 	val topEdge = sortedEdges.first
-		// 	filteredGraph = gnGraph
-		// 		.subgraph(epred = (et) => {
-		// 			!(((et.srcId == topEdge.srcId) && (et.dstId == topEdge.dstId)) ||
-		// 			((et.srcId == topEdge.dstId) && (et.dstId == topEdge.srcId)))
-		// 		})
-
-		// 	//compute modularity
+			i+=1
 
 
-		// 	// gnGraph = GirvanNewman
-		// 	// 	.computeBetweennessGraph(Graph(filteredGraph.vertices, filteredGraph.edges ++ filteredGraph.edges))
-		// 	// 	.subgraph(epred = (et) => et.srcId < et.dstId)
-		// }
+			//compute modularity
+
+
+			val modularity = GirvanNewman.computeModularity(filteredGraph)
+			pw.write( "Modularity = " + modularity + "\n")
+			println( "Modularity = " + modularity)
+
+
+
+		}
 
 		pw.close()
 
