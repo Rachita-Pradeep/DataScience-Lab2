@@ -36,8 +36,8 @@ class PaperRecord(paperString: String, authorString: String, yearString: String,
     val series: String = paperSplit(0)
     val group: String = paperSplit(1)
     // val paperId: String = paperSplit(2)
-    // val authors: Array[String] = authorString.split(",").map( _.replace(" ", "")).filter(_.length > 0)
-    val authors: Array[String] = authorString.split(",").filter(_.length > 0)
+    val authors: Array[String] = authorString.split(",").map( _.replace(" ", "").replace("\"", "")).filter(_.length > 0)
+    //val authors: Array[String] = authorString.split(",").filter(_.length > 0)
     val year: Int = yearString.toInt
 
     override def toString = s"$paper,$authors,$year"
@@ -86,6 +86,8 @@ object DBLPGraph {
 
     val paperFile = sc.textFile(args(0))
     val outputDirectory = args(1)
+    val filePrefix = args(2)
+
 
     // val firstHundredLines = paperFile
 
@@ -102,7 +104,7 @@ object DBLPGraph {
 
     
 
-    val groupedRecords = paperFile
+    val papers = paperFile
         // .map(line => {
         //     val record = PaperRecord(line)
         //     record match {
@@ -113,45 +115,89 @@ object DBLPGraph {
         // })
         .map(line => PaperRecord(line))
         .flatMap(rec => rec )
-        .groupBy(rec => rec.series)
+        .filter(rec => rec.authors.length > 2)
+        .filter( rec => if(args.length > 3) rec.paper.startsWith(args(3)) else true)
 
-    groupedRecords.foreach(pair => {
+    val authors = 
+        papers
+        .flatMap(rec => rec.authors)
+        .distinct
 
-      // val record = pair._2.head
 
-      // val filteredRecords = pair._2.filter(rec => rec.authors.length >= 2).toArray.length
+    // println("Number of papers: " + papers.count)
+    // println("Number of authors: " + authors.count)
+
+    val authorMap: Map[String, Long] = authors.zipWithIndex.collect.toMap
+
+    val authorFile = outputDirectory + "dblp.authors." + filePrefix + ".csv"
+    val aw = new java.io.PrintWriter(new File(authorFile))
+    authorMap.foreach(pair => {
+
+      aw.write(pair._1 + "," + pair._2 + "\n")
+
+    })
+    aw.close
+
+    //for each paper
+    //map authors to set of integers
+    //compute pairwise combinations
+    //output edges 0 1
+    val edgeFile = outputDirectory + "dblp.edges." + filePrefix + ".txt"
+    val ew = new java.io.PrintWriter(new File(edgeFile))
+    papers
+    .flatMap(rec => {
+      rec.authors
+      .map(author => authorMap(author))
+      .toList
+      .combinations(2)
+      .map(list => (list(0), list(1)))
+    })
+    .collect
+    .foreach(pair => ew.write(pair._1 + " " + pair._2 + "\n"))
+
+    ew.close
+
+    // authors.foreach(println)
+
+
+    // groupedRecords.foreach(pair => {
+
+    //   // val record = pair._2.head
+
+    //   // val filteredRecords = pair._2.filter(rec => rec.authors.length >= 2).toArray.length
       
 
 
-      // val uniqueAuthors = pair._2.flatMap(rec => rec.authors).toSet.size
-      // println(pair._1 + " : " + uniqueAuthors + "nodes, "+ filteredRecords + " edges")
+    //   // val uniqueAuthors = pair._2.flatMap(rec => rec.authors).toSet.size
+    //   // println(pair._1 + " : " + uniqueAuthors + "nodes, "+ filteredRecords + " edges")
 
 
 
-      // val outputFileName = outputDirectory + "dblp." + pair._1 + ".json"
-      // val pw = new java.io.PrintWriter(new File(outputFileName))
+    //   // val outputFileName = outputDirectory + "dblp." + pair._1 + ".json"
+    //   // val pw = new java.io.PrintWriter(new File(outputFileName))
 
-      // pair._2.foreach( rec => {
+    //   pair._2.foreach( rec => {
 
-      //   pw.write(rec.line + "\n")
+    //     println(rec.paper)
+    //     // pw.write(rec.line + "\n")
 
-      // })
+    //   })
 
-      // pw.close
+    //   // pw.close
 
 
 
-      // val record = pair._2.head
-      // println("**************************************************")
-      // println(record.paper)
-      // // println(record.series)
-      // // println(record.group)
-      // // println(record.paperId)
-      // record.authors.foreach(println)
-      // println(record.year)
-      // println(record.line)
+    //   // val record = pair._2.head
+    //   // println("**************************************************")
+    //   // println(record.paper)
+    //   // // println(record.series)
+    //   // // println(record.group)
+    //   // // println(record.paperId)
+    //   // record.authors.foreach(println)
+    //   // println(record.year)
+    //   // println(record.line)
 
-    })
+    // })
 
 
     // filteredRecords.foreach( record => {

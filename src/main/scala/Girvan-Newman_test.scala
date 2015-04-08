@@ -7,6 +7,9 @@ import org.apache.spark._
 import org.apache.spark.graphx._
 import scala.reflect.{ClassTag, classTag}
 
+import org.apache.log4j.Logger
+import org.apache.log4j.Level
+
 import java.io._
 
 
@@ -21,6 +24,9 @@ object GirvanNewmanTest {
 	      .set("spark.serializer", "org.apache.spark.serializer.KryoSerializer")
 	      // .set("spark.kryo.registrator", "Registrator")
 	    val sc = new SparkContext(conf)
+
+	    // Logger.getLogger("org").setLevel(Level.WARN)
+    	// Logger.getLogger("akka").setLevel(Level.WARN)
 
 		//graph file is in args(0)
 		val inputGraph = GraphLoader.edgeListFile(sc, args(0))
@@ -87,6 +93,7 @@ object GirvanNewmanTest {
 		while(!filteredGraph.edges.isEmpty) {
 
 			// println()
+			//only for connected graphs?
 			val gnGraph = GirvanNewman
 				.computeBetweennessGraph(filteredGraph)
 			gnGraph.cache()
@@ -99,26 +106,27 @@ object GirvanNewmanTest {
 				.triplets
 				.sortBy(triplet => triplet.attr, false)
 
-			val edgeArray = sortedEdges
-			.collect
+			// val edgeArray = sortedEdges
+			// .collect
 		
-			pw.write("\n***********************************\n\n" + i + "\n\n")
-			println("\n***********************************\n\n" + i + "\n\n")
-			edgeArray
-			.filter(triplet => triplet.srcId < triplet.dstId)
-			.foreach(triplet => {
-					pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
-					println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-				})
+			// pw.write("\n***********************************\n\n" + i + "\n\n")
+			// println("\n***********************************\n\n" + i + "\n\n")
+			// edgeArray
+			// .filter(triplet => triplet.srcId < triplet.dstId)
+			// .foreach(triplet => {
+			// 		pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
+			// 		println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
+			// 	})
 
 			topEdge = sortedEdges.first
 
 			sortedEdges.unpersist(blocking=false)
 
+			//filter out any edges within .001% of the topEdge
+			val difference = .99999
 			filteredGraph = gnGraph
 				.subgraph(epred = (et) => {
-					!(((et.srcId == topEdge.srcId) && (et.dstId == topEdge.dstId)) ||
-					((et.srcId == topEdge.dstId) && (et.dstId == topEdge.srcId)))
+					et.attr < difference*topEdge.attr
 				})
 
 			gnGraph.unpersistVertices(blocking=false)
@@ -130,9 +138,14 @@ object GirvanNewmanTest {
 			//compute modularity
 
 
-			val modularity = GirvanNewman.computeModularity(filteredGraph)
-			pw.write( "Modularity = " + modularity + "\n")
-			println( "Modularity = " + modularity)
+
+			val pair = GirvanNewman.computeModularity(filteredGraph)
+			val numberOfComponents = pair._1
+			val modularity = pair._2
+			pw.write("\n***********************************\n" + i + "\n")
+			// println("\n***********************************\n\n" + i + "\n\n")
+			pw.write( "Modularity = " + modularity + ", numberOfComponents = " + numberOfComponents + "\n")
+			// println( "Modularity = " + modularity + ", numberOfComponents = " + numberOfComponents)
 
 
 

@@ -55,9 +55,9 @@ object GirvanNewman {
 			shortestPaths.cache()
 
 
-			val terminalVerticesMap = collection.mutable.Map[VertexId, Set[VertexId]]()
+			// val terminalVerticesMap = collection.mutable.Map[VertexId, Set[VertexId]]()
 			val noEdges = shortestPaths.vertices.context.emptyRDD(classTag[Edge[VertexId]])
-			var shortestPathGraph: Graph[SPMap, VertexId] = Graph(shortestPaths.vertices, noEdges)
+			var shortestPathGraph: Graph[VD, VertexId] = Graph(graph.vertices, noEdges)
 			// shortestPathGraph.cache()
 
 
@@ -76,20 +76,21 @@ object GirvanNewman {
 					})
 					.mapEdges(pair => root)
 
-				val terminalVertices: Set[VertexId] = 
-					shortestPathGraphForRoot.outerJoinVertices(shortestPathGraph.outDegrees) { (id, oldAttr, outDegOpt) =>
-					  outDegOpt match {
-					    case Some(outDeg) => outDeg
-					    case None => 0 // No outDegree means zero outDegree
-					  }
-					}
-					.vertices
-					.filter(pair => pair._2 == 0)
-					.keys
-					.collect
-					.toSet
+				// val terminalVertices: Set[VertexId] = 
 
-				terminalVerticesMap(root) = terminalVertices
+				// 	shortestPathGraphForRoot.outerJoinVertices(shortestPathGraph.outDegrees) { (id, oldAttr, outDegOpt) =>
+				// 	  outDegOpt match {
+				// 	    case Some(outDeg) => outDeg
+				// 	    case None => 0 // No outDegree means zero outDegree
+				// 	  }
+				// 	}
+				// 	.vertices
+				// 	.filter(pair => pair._2 == 0)
+				// 	.keys
+				// 	.collect
+				// 	.toSet
+
+				// terminalVerticesMap(root) = terminalVertices
 
 				val oldSPG = shortestPathGraph
 				shortestPathGraph = Graph(shortestPathGraph.vertices,
@@ -215,25 +216,34 @@ object GirvanNewman {
 		var returnGraph = graph.mapEdges(e => 0.0)
 		returnGraph.cache()
 
-		while (!graphVertices.isEmpty) {
-			
-			val singleBetweennessGraph = betweennessGraphForRoots(graphVertices.take(maxGroupSize))
-			
-			val oldRG = returnGraph
-			returnGraph = Graph(returnGraph.vertices,
-				returnGraph.edges ++ singleBetweennessGraph.edges)
-				.groupEdges( (e1, e2) => e1 + e2)
-			returnGraph.cache()
-
-			// singleBetweennessGraph.unpersist()
-			// returnGraph.cache()
-
-			graphVertices = graphVertices.drop(maxGroupSize)
-
-			oldRG.unpersistVertices(blocking=false)
-			oldRG.edges.unpersist(blocking=false)
-
+		if(maxGroupSize >= graphVertices.length)
+		{
+			returnGraph = betweennessGraphForRoots(graphVertices)
 		}
+		else
+		{
+			while (!graphVertices.isEmpty) {
+			
+				val singleBetweennessGraph = betweennessGraphForRoots(graphVertices.take(maxGroupSize))
+				
+				val oldRG = returnGraph
+				returnGraph = Graph(returnGraph.vertices,
+					returnGraph.edges ++ singleBetweennessGraph.edges)
+					.groupEdges( (e1, e2) => e1 + e2)
+				returnGraph.cache()
+
+				// singleBetweennessGraph.unpersist()
+				// returnGraph.cache()
+
+				graphVertices = graphVertices.drop(maxGroupSize)
+
+				oldRG.unpersistVertices(blocking=false)
+				oldRG.edges.unpersist(blocking=false)
+
+			}
+		}
+
+		
 		returnGraph
 
 		// 5-(23.79047619047619)-> 8
@@ -274,7 +284,7 @@ object GirvanNewman {
 
 	}
 
-	def computeModularity[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): Double = {
+	def computeModularity[VD: ClassTag, ED: ClassTag](graph: Graph[VD, ED]): (Int, Double) = {
 
 		//get connected components
 		//generate graph for each component
@@ -327,7 +337,7 @@ object GirvanNewman {
 				.fold(0.0)(_ + _)
 			})
 		
-		normalizingCost * modularityValuesForComponent.fold(0.0)(_ + _)
+		(modularityValuesForComponent.toSeq.length, normalizingCost * modularityValuesForComponent.fold(0.0)(_ + _))
 
 	}
 }
