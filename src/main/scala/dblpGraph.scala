@@ -144,7 +144,7 @@ object DBLPGraph {
     //output edges 0 1
     val edgeFile = outputDirectory + "dblp.edges." + filePrefix + ".txt"
     val ew = new java.io.PrintWriter(new File(edgeFile))
-    papers
+    val papersCollection = papers
     .flatMap(rec => {
       rec.authors
       .map(author => authorMap(author))
@@ -153,7 +153,12 @@ object DBLPGraph {
       .map(list => (list(0), list(1)))
     })
     .collect
+
+    papersCollection
     .foreach(pair => ew.write(pair._1 + " " + pair._2 + "\n"))
+
+    println("Number of nodes = " + authorMap.size)
+    println("Number of edges = " + papersCollection.length)
 
     ew.close
 

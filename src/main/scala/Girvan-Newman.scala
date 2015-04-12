@@ -305,11 +305,11 @@ object GirvanNewman {
 			.collect
 			.map(pair => pair._2)
 
-		connectedComponetLists.foreach(it => {
-			println("PRINTING CC LISTS")
-			println("Length: " + it.toList.length)
-			it.foreach(println)
-		})
+		// connectedComponetLists.foreach(it => {
+		// 	println("PRINTING CC LISTS")
+		// 	println("Length: " + it.toList.length)
+		// 	it.foreach(println)
+		// })
 
 		val verticesWithDegAndNeigh: VertexRDD[(Int, Array[VertexId])] =
 			graph.inDegrees.innerJoin(graph.collectNeighborIds(EdgeDirection.Out))((id, inDeg, neighbors) => (inDeg, neighbors))
@@ -337,6 +337,9 @@ object GirvanNewman {
 				.fold(0.0)(_ + _)
 			})
 		
+		// val retVal = normalizingCost * modularityValuesForComponent.fold(0.0)(_ + _)
+		// if (retVal.isNaN) (modularityValuesForComponent.toSeq.length, -1.0)
+		// else (modularityValuesForComponent.toSeq.length, retVal)
 		(modularityValuesForComponent.toSeq.length, normalizingCost * modularityValuesForComponent.fold(0.0)(_ + _))
 
 	}
