@@ -31,21 +31,7 @@ object GirvanNewmanTest {
 		//graph file is in args(0)
 		val inputGraph = GraphLoader.edgeListFile(sc, args(0))
 
-
-		// inputGraph.triplets.foreach( triplet => {
-
-		// 		println(triplet.srcId + " -> " + triplet.dstId)
-
-		// 	}
-		// )
-
-		// println("edges in file: " + inputGraph.triplets.count)	
-
 		val uniqueInputGraph = inputGraph.groupEdges( (e1, e2) => e1)
-
-		// println("unique edges in file: " + uniqueInputGraph.triplets.count)	
-
-
 
 		println("****************************************************")
 		//graph file is undirected, but graphs are treated as directed
@@ -53,43 +39,7 @@ object GirvanNewmanTest {
 
 		val testGraph = Graph(uniqueInputGraph.vertices, inputGraph.edges ++ inputGraph.edges.reverse)
 
-		//might need to group edges to remove duplicates
-
-		// testGraph.triplets.foreach( triplet => {
-
-		// 		println(triplet.srcId + " -> " + triplet.dstId)
-
-		// 	}
-		// )
-
-
-		// GirvanNewman.run(testGraph)
-		// GirvanNewman.runAlternate(testGraph)
 		val pw = new java.io.PrintWriter(new File(outputFilename))
-
-		// var gnGraph = GirvanNewman
-		// 	.computeBetweennessGraph(testGraph)
-		// 	.subgraph(epred = (et) => et.srcId < et.dstId)
-
-		// 	pw.write("\n***********************************\n\n")
-		// 	println("\n***********************************\n\n")
-		// 	val sortedEdges = 
-		// 		gnGraph
-		// 		.triplets
-		// 		.sortBy(triplet => triplet.attr, false)
-
-			// sortedEdges.collect.foreach(triplet => {
-			// 		pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
-			// 		println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-			// 	})
-
-			// val topEdge = sortedEdges.first
-			// val filteredGraph = gnGraph
-			// 	.subgraph(epred = (et) => et != topEdge)
-
-			// gnGraph = GirvanNewman
-			// 	.computeBetweennessGraph(Graph(filteredGraph.vertices, filteredGraph.edges ++ filteredGraph.edges))
-			// 	.subgraph(epred = (et) => et.srcId < et.dstId)
 
 		var filteredGraph = testGraph.mapEdges(edge => 0.0)
 		filteredGraph.cache()
@@ -116,21 +66,7 @@ object GirvanNewmanTest {
 				.triplets
 				.sortBy(triplet => triplet.attr, false)
 
-			// val edgeArray = sortedEdges
-			// .collect
-		
-			// pw.write("\n***********************************\n\n" + i + "\n\n")
-			// println("\n***********************************\n\n" + i + "\n\n")
-			// edgeArray
-			// .filter(triplet => triplet.srcId < triplet.dstId)
-			// .foreach(triplet => {
-			// 		pw.write( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId + "\n")
-			// 		println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-			// 	})
-
 			topEdge = sortedEdges.first
-			// if(topEdge.srcId > topEdge.dstId) topEdge = topEdge.reverse
-
 			sortedEdges.unpersist(blocking=false)
 
 			//filter out any edges within .1% of the topEdge
@@ -141,7 +77,6 @@ object GirvanNewmanTest {
 				})
 
 			//compute modularity
-
 			val pair = GirvanNewman.computeModularity(filteredGraph)
 			val numberOfComponents = pair._1
 			val modularity = pair._2
@@ -225,37 +160,13 @@ object GirvanNewmanTest {
 
 				filteredGraph = Graph(filteredVertices, filteredEdges ++ filteredEdges.reverse)
 
-				// {
-				// 	"id" : 0,
-				// 	"nodes" : [
-				// 		{ "id": 0,
-				// 			"value" : 0.5,
-				// 			"top_author" : "Turing" },
-				// 		{ "id": 3,
-				// 			"value" : 0.3,
-				// 			"top_author" : "Hawking" },
-				// 		{ "id": 8,
-				// 			"value" : 0.2,
-				// 			"top_author" : "Einstein" },
-				// 	],
-				// 	"edges" : [
-				// 		{ 	"src_id" : 0,
-				// 			"dst_id" : 3,
-				// 			"value" : 0.7 },
-				// 		{ 	"src_id" : 3,
-				// 			"dst_id" : 8,
-				// 			"value" : 0.2 }
-				// 	]
-				// },
 				println("Biggest graph is " + largestCCVertexId + " with " + filteredGraph.edges.count + " edges.")
 				pw.write("\n***********************************\n" + i + "\n")
 				pw.write("{\n\"id\" : " + i + ",\n\"nodes\" : [\n")
 				val verticesString: String = vertexMappingRelative.toList.foldLeft("")((str, pair) => str + "{\"id\": " + pair._1 + ", \"value\" : " + pair._2 + " }\n")
-				// .foreach(pair => pw.write("{\"id\": " + pair._1 + ", \"value\" : " + pair._2) + " }\n")
 				pw.write(verticesString)
 				pw.write("],\n\"edges\" : [\n")
 				val edgesString = finalEdgeList.foldLeft("") ((str, pair) => str + "{\"src_id\": " + pair._1._1 + ", \"dst_id\": " + pair._1._2 + ", \"value\" : " + pair._2 + " }\n")
-				// finalEdgeList.foreach(pair => pw.write("{\"src_id\": " + pair._1._1 + ", \"dst_id\": " + pair._1._2 + ", \"value\" : " + pair._2 + " }\n")
 				pw.write(edgesString)
 				pw.write("],\n}\n")
 
@@ -280,30 +191,6 @@ object GirvanNewmanTest {
 		}
 
 		pw.close()
-
-		// gnGraph
-		// 	.triplets
-		// 	.sortBy(triplet => triplet.attr, false)
-		// 	.foreach(triplet => {
-		// 		println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-		// 	})
-			// .take(3)
-			// .map(triplet => (triplet.srcId, triplet.dstId))
-			// .toSet
-
-		// gnGraphTop3Edges.foreach(pair => println(pair._1 + " -> " + pair._2))
-
-		// val filteredGNGraph = gnGraph
-		// 	.subgraph(epred = (et) => !gnGraphTop3Edges.contains(et.srcId, et.dstId))
-
-		// filteredGNGraph.triplets.foreach(triplet => {
-		// 	println( triplet.srcId + "-(" + triplet.attr + ")-> " + triplet.dstId)
-		// })
-
-		
-
-
-
 
 	}
 }

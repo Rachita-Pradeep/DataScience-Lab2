@@ -6,6 +6,7 @@ import org.apache.spark.graphx.lib.ShortestPaths
 import org.apache.spark.graphx.lib.ShortestPaths._
 import scala.reflect.{ClassTag, classTag}
 import org.apache.spark.rdd.RDD
+// import org.apache.log4j._
 
 object GirvanNewman {
 
@@ -108,6 +109,7 @@ object GirvanNewman {
 			// vertices contain maps
 			// keys are roots (parameter)
 			// values are the number of shortest paths to this node from the key
+			// NOTE: THIS BLOWS UP THE STACK!!!!
 			
 			val initialGraph = shortestPathGraph.mapVertices { (id, attr) =>
 		      if (roots.contains(id)) makeRootMap(id -> makeMap(id -> 1.0)) else makeRootMap()
@@ -115,7 +117,7 @@ object GirvanNewman {
 
 		    val initialMessage = makeRootMap()
 
-		    println("\n\n***********************************\n\n")
+		    // println("\n\n***********************************\n\n")
 		    println("pregel 1 start")
 		    // remember that this graph is a multiset of combined shortest path graphs above
 		    // The edge attributes denote the root vertexId that they belong to
@@ -143,7 +145,7 @@ object GirvanNewman {
 			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
-			println("\n\n***********************************\n\n")
+			// println("\n\n***********************************\n\n")
 		    println("pregel 1 end")
 			// val verticesArray: Array[(VertexId, RootGNMap)] = numShortestPathsGraph.vertices.collect
 
@@ -164,7 +166,7 @@ object GirvanNewman {
 		      	.foldLeft(makeRootMap())( (acc, x) => mergeMapsWithReplace(acc, x))
 		    }
 		
-			println("\n\n***********************************\n\n")
+			// println("\n\n***********************************\n\n")
 		    println("pregel 2 start")
 			val betweennessVertexGraph = initialGraph2.pregel(initialMessage, 10, EdgeDirection.In)(
 			  (id, attr, msg) => {
@@ -191,7 +193,7 @@ object GirvanNewman {
 			  (a,b) => mergeMapsWithReplace(a, b) // Merge Message
 			  )
 
-			println("\n\n***********************************\n\n")
+			// println("\n\n***********************************\n\n")
 		    println("pregel 2 end")
 
 			val verticesArray: Array[(VertexId, RootGNMap)] = betweennessVertexGraph.vertices.collect
